@@ -197,6 +197,20 @@ function M.market_value(item_key)
 	return read_record(item_key).daily_min_buyout
 end
 
+-- Returns the cheapest price from the most recent scan (today or last available day)
+function M.recent_value(item_key)
+	local item_record = read_record(item_key)
+	-- First check today's value
+	if item_record.daily_min_buyout then
+		return item_record.daily_min_buyout
+	end
+	-- Otherwise use the most recent data point (index 1 is most recent)
+	if item_record.data_points and item_record.data_points[1] then
+		return item_record.data_points[1].value
+	end
+	return nil
+end
+
 function weighted_median(list)
 	sort(list, function(a,b) return a.value < b.value end)
 	local weight = 0
