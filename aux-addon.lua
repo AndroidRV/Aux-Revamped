@@ -66,6 +66,7 @@ function handle.LOAD()
         merchant_buy = {},
         merchant_sell = {},
 		sharing = true,
+		undercut_debug = false,
     })
     do
         local key = format('%s|%s', GetCVar'realmName', UnitName'player')

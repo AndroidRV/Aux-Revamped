@@ -236,7 +236,7 @@ M.search_columns = {
 M.auctions_columns = {
     {
         title = 'Item:',
-        width = .35,
+        width = .29,
         init = item_column_init,
         fill = item_column_fill,
         cmp = function(record_a, record_b, desc)
@@ -245,7 +245,7 @@ M.auctions_columns = {
     },
     {
         title = 'Lvl:',
-        width = .035,
+        width = .03,
         align = 'CENTER',
         fill = function(cell, record)
             local display_level = max(record.level, 1)
@@ -258,7 +258,7 @@ M.auctions_columns = {
     },
     {
         title = 'Auctions:',
-        width = .06,
+        width = .05,
         align = 'CENTER',
         fill = function(cell, record, count, own, expandable)
             local numAuctionsText = expandable and aux.color.link(count) or count
@@ -279,7 +279,7 @@ M.auctions_columns = {
     },
     {
         title = 'Stack\nSize:',
-        width = .055,
+        width = .045,
         align = 'CENTER',
         fill = function(cell, record)
             cell.text:SetText(record.aux_quantity)
@@ -290,7 +290,7 @@ M.auctions_columns = {
     },
     {
         title = 'Time\nLeft:',
-        width = .04,
+        width = .035,
         align = 'CENTER',
         fill = function(cell, record)
             cell.text:SetText(TIME_LEFT_STRINGS[record.duration or 0] or '?')
@@ -301,7 +301,7 @@ M.auctions_columns = {
     },
     {
         title = {'Auction Bid\n(per item):', 'Auction Bid\n(per stack):'},
-        width = .125,
+        width = .11,
         align = 'RIGHT',
         isPrice = true,
         fill = function(cell, record)
@@ -331,7 +331,7 @@ M.auctions_columns = {
     },
     {
         title = {'Auction Buyout\n(per item):', 'Auction Buyout\n(per stack):'},
-        width = .125,
+        width = .11,
         align = 'RIGHT',
         isPrice = true,
         fill = function(cell, record)
@@ -349,7 +349,7 @@ M.auctions_columns = {
     },
     {
         title = 'High Bidder:',
-        width = .21,
+        width = .16,
         align = 'CENTER',
         fill = function(cell, record)
             cell.text:SetText(record.high_bidder or aux.color.red 'No Bids')
@@ -364,6 +364,32 @@ M.auctions_columns = {
             else
                 return sort_util.compare(record_a.high_bidder, record_b.high_bidder, desc)
             end
+        end,
+    },
+    {
+        title = 'Undercut:',
+        width = .11,
+        align = 'CENTER',
+        fill = function(cell, record)
+            if record.undercut_status == 'checking' then
+                cell.text:SetText(aux.color.yellow'Checking...')
+            elseif record.undercut_status == 'undercut' then
+                cell.text:SetText(aux.color.red'UNDERCUT')
+            elseif record.undercut_status == 'lowest' then
+                cell.text:SetText(aux.color.green'Lowest')
+            elseif record.undercut_status == 'no_buyout' then
+                cell.text:SetText(aux.color.orange'No Buyout')
+            elseif record.undercut_status == 'error' then
+                cell.text:SetText(aux.color.gray'Error')
+            else
+                cell.text:SetText(aux.color.gray'Not Checked')
+            end
+        end,
+        cmp = function(record_a, record_b, desc)
+            local status_order = {undercut = 1, lowest = 2, no_buyout = 3, error = 4, checking = 5, [nil] = 6}
+            local status_a = status_order[record_a.undercut_status] or 6
+            local status_b = status_order[record_b.undercut_status] or 6
+            return sort_util.compare(status_a, status_b, desc)
         end,
     },
 }

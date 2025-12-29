@@ -64,6 +64,9 @@ function SlashCmdList.AUX(command)
 	elseif arguments[1] == 'show' and arguments[2] == 'hidden' then
 		aux.account_data.showhidden = not aux.account_data.showhidden
 		aux.print('show hidden ' .. status(aux.account_data.showhidden))
+	elseif arguments[1] == 'debug' then
+		aux.account_data.undercut_debug = not aux.account_data.undercut_debug
+		aux.print('undercut debug ' .. status(aux.account_data.undercut_debug))
 	else
 		aux.print('Usage:')
 		aux.print('- scale [' .. aux.color.blue(aux.account_data.scale) .. ']')
@@ -82,5 +85,6 @@ function SlashCmdList.AUX(command)
 		aux.print('- populate wdb')
 		aux.print('- sharing [' .. status(aux.account_data.sharing) .. ']')
 		aux.print('- show hidden [' .. status(aux.account_data.showhidden) .. ']')
+		aux.print('- debug [' .. status(aux.account_data.undercut_debug or false) .. ']')
     end
 end

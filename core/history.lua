@@ -101,21 +101,57 @@ AUX_data_sharer:SetScript("OnEvent", function()
 	end
   end)
 
+-- Track lowest price seen per item during current scan session
+local current_scan_prices = {}
+
 function M.process_auction(auction_record, pages)
 	local item_record = read_record(auction_record.item_key)
 	local unit_buyout_price = ceil(auction_record.buyout_price / auction_record.aux_quantity)
 	local item_key = auction_record.item_key
-	if unit_buyout_price > 0 and unit_buyout_price < (item_record.daily_min_buyout or aux.huge) then
-		item_record.daily_min_buyout = unit_buyout_price
-		write_record(auction_record.item_key, item_record)
+	local price_updated = false
+
+	if unit_buyout_price > 0 then
+		-- Track the lowest price we see in this scan
+		if not current_scan_prices[item_key] or unit_buyout_price < current_scan_prices[item_key] then
+			current_scan_prices[item_key] = unit_buyout_price
+		end
+
+		-- ALWAYS update to current scan's lowest price (override history)
+		-- Handle nil case properly
+		if not item_record.daily_min_buyout or current_scan_prices[item_key] ~= item_record.daily_min_buyout then
+			item_record.daily_min_buyout = current_scan_prices[item_key]
+			write_record(auction_record.item_key, item_record)
+			price_updated = true
+		end
+
 		--AuxAddon:SendCommMessage("GUILD", item_key, unit_buyout_price) relies on acecomm
 		if aux.account_data.sharing == true then
-			if pages < 15 then --to avoid sharing data when people do searches without a keyword "full scans"
+			if pages and pages < 15 then --to avoid sharing data when people do searches without a keyword "full scans"
 				if GetChannelName("LFT") ~= 0 then
 					ChatThrottleLib:SendChatMessage("BULK", nil, "AuxData," .. item_key .."," .. unit_buyout_price , "CHANNEL", nil, GetChannelName("LFT")) --ChatThrottleLib fixed for turtle by Candor https://github.com/trumpetx/ChatLootBidder/blob/master/ChatThrottleLib.lua
 				  	--print("sent")
 				end
 		 	end
+		end
+	end
+
+	-- Always refresh crafting windows when price updates
+	if price_updated then
+		if TradeSkillFrame and TradeSkillFrame:IsVisible() then
+			local current_selection = GetTradeSkillSelectionIndex()
+			TradeSkillFrame_Update()
+			-- Restore selection to trigger cost recalculation
+			if current_selection > 0 then
+				TradeSkillFrame_SetSelection(current_selection)
+			end
+		end
+		if CraftFrame and CraftFrame:IsVisible() then
+			local current_selection = GetCraftSelectionIndex()
+			CraftFrame_Update()
+			-- Restore selection to trigger cost recalculation
+			if current_selection > 0 then
+				CraftFrame_SetSelection(current_selection)
+			end
 		end
 	end
 end
