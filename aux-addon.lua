@@ -89,6 +89,7 @@ function handle.LOAD()
             characters = {},
             recent_searches = {},
             favorite_searches = {},
+            reagent_scan_list = {},
         })
     end
 end

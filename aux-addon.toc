@@ -51,6 +51,9 @@ tabs\auctions\frame.lua
 tabs\bids\core.lua
 tabs\bids\frame.lua
 
+tabs\reagents\core.lua
+tabs\reagents\frame.lua
+
 core\crafting.lua
 
 localization.lua
