@@ -116,30 +116,22 @@ do
         end
     end
 
-    -- Extract common prefix from item names for batch checking
-    local function get_search_prefix(item_name)
-        -- Common prefixes for grouping (exact match)
-        local prefixes = {
-            'Devilsaur',
-            'Corehound',
-            'Netherwind',
-            'Earthfury',
-            'Giantstalker',
-            'Nightslayer',
-            'Cenarion',
-            'Frostwolf',
-        }
-
-        for i = 1, table.getn(prefixes) do
-            local prefix = prefixes[i]
-            -- Check if item name starts with this prefix
-            if string.find(item_name, '^' .. prefix) then
-                return prefix
-            end
+    -- Extract first word from item name for dynamic prefix detection
+    local function extract_first_word(item_name)
+        if not item_name then
+            return nil
         end
 
-        -- Default: use full name for items without common prefix
-        return item_name
+        -- Find first space
+        local space_pos = string.find(item_name, ' ')
+
+        if space_pos then
+            -- Return substring before first space
+            return string.sub(item_name, 1, space_pos - 1)
+        else
+            -- No space found - single word name
+            return item_name
+        end
     end
 
     function M.check_undercuts()
@@ -158,51 +150,102 @@ do
         current_check_index = 1
         checking = true
 
-        -- Group items by search prefix for efficient batch checking
-        local prefix_groups = {}
+        -- Group items by prefix + class combination for efficient batch checking
+        local prefix_class_groups = {}  -- Keyed by "prefix|class_index"
+        local solo_items = {}
 
+        -- Pass 1: Initial grouping by prefix + class
         for i = 1, table.getn(auction_records) do
             local record = auction_records[i]
             if record.buyout_price and record.buyout_price > 0 then
                 record.undercut_status = nil
 
-                -- Get search prefix for this item
-                local prefix = get_search_prefix(record.name)
-
-                -- Create group if it doesn't exist
-                if not prefix_groups[prefix] then
-                    prefix_groups[prefix] = {
-                        search_name = prefix,
-                        items = {},
-                        class = nil
-                    }
-                end
-
-                -- Detect item class from first item in group
-                if not prefix_groups[prefix].class then
+                -- Extract first word as prefix
+                local prefix = extract_first_word(record.name)
+                if not prefix then
+                    record.undercut_status = 'error'
+                    debug_log('|cffff0000[Group] Item has no name: ' .. tostring(record.item_id) .. '|r')
+                else
+                    -- Get item info for class and quality
                     local item_info = info.item(record.item_key)
-                    if item_info and item_info.class then
-                        -- Convert class string to numeric index
-                        local class_index = info.item_class_index(item_info.class)
-                        if class_index then
-                            prefix_groups[prefix].class = class_index
-                            debug_log('|cff00ff00[Group] ' .. prefix .. ' -> class "' .. item_info.class .. '" = ' .. tostring(class_index) .. '|r')
-                        end
+
+                    -- Only check blue (rare) quality and above (quality >= 3)
+                    if not item_info or not item_info.quality or item_info.quality < 3 then
+                        -- Skip items below rare quality
+                        record.undercut_status = nil
+                        debug_log('|cff888888[Skip] ' .. record.name .. ' - quality too low (' .. tostring(item_info and item_info.quality or 'unknown') .. ')|r')
                     else
-                        debug_log('|cffff0000[Group] ' .. prefix .. ' -> no class detected|r')
+                        -- Get class, subclass, and quality indices
+                        local class_index = nil
+                        local subclass_index = nil
+                        local quality = item_info.quality
+
+                        if item_info.class then
+                            class_index = info.item_class_index(item_info.class)
+                            if class_index and item_info.subclass then
+                                subclass_index = info.item_subclass_index(class_index, item_info.subclass)
+                            end
+                        end
+
+                        -- Create composite key: "prefix|class|subclass|quality"
+                        local group_key = prefix .. '|' .. tostring(class_index or 'nil') .. '|' .. tostring(subclass_index or 'nil') .. '|' .. tostring(quality or 'nil')
+
+                        -- Create group if doesn't exist
+                        if not prefix_class_groups[group_key] then
+                            prefix_class_groups[group_key] = {
+                                prefix = prefix,
+                                class = class_index,
+                                subclass = subclass_index,
+                                quality = quality,
+                                items = {},
+                            }
+                        end
+
+                        -- Add item to group
+                        tinsert(prefix_class_groups[group_key].items, record)
                     end
                 end
-
-                -- Add item to group
-                tinsert(prefix_groups[prefix].items, record)
             else
                 record.undercut_status = 'no_buyout'
             end
         end
 
-        -- Convert groups to queue
-        for prefix, group in pairs(prefix_groups) do
-            tinsert(check_queue, group)
+        -- Pass 2: Separate multi-item groups from solo items
+        for group_key, group in pairs(prefix_class_groups) do
+            local item_count = table.getn(group.items)
+
+            if item_count >= 2 then
+                -- Multi-item group: Use prefix search
+                tinsert(check_queue, {
+                    search_name = group.prefix,
+                    class = group.class,
+                    subclass = group.subclass,
+                    quality = group.quality,
+                    items = group.items,
+                })
+                debug_log('|cff00ff00[Group] ' .. group.prefix .. ' (class=' .. tostring(group.class) .. ' subclass=' .. tostring(group.subclass) .. ' quality=' .. tostring(group.quality) .. ') -> ' .. item_count .. ' items (prefix search)|r')
+            else
+                -- Solo item: Store with all filters for later
+                tinsert(solo_items, {
+                    item = group.items[1],
+                    class = group.class,
+                    subclass = group.subclass,
+                    quality = group.quality,
+                })
+            end
+        end
+
+        -- Pass 3: Add solo items to queue with full name searches
+        for i = 1, table.getn(solo_items) do
+            local solo = solo_items[i]
+            tinsert(check_queue, {
+                search_name = solo.item.name,  -- Full name, not prefix
+                class = solo.class,
+                subclass = solo.subclass,
+                quality = solo.quality,
+                items = {solo.item},           -- Single item in array
+            })
+            debug_log('|cff00ffff[Solo] "' .. solo.item.name .. '" (class=' .. tostring(solo.class) .. ' subclass=' .. tostring(solo.subclass) .. ' quality=' .. tostring(solo.quality) .. ') (individual search)|r')
         end
 
         if table.getn(check_queue) == 0 then
@@ -274,16 +317,21 @@ do
 
         debug_log('|cff00ffff[Undercut] Searching for: "' .. group.search_name .. '" (' .. table.getn(group.items) .. ' items)|r')
 
-        -- Build query with class filter if detected
+        -- Build query with all available filters
         local query = {
             name = group.search_name,
         }
         if group.class then
             query.class = group.class
-            debug_log('|cff00ff00[Undercut] Using class filter: ' .. tostring(group.class) .. ' (type: ' .. type(group.class) .. ')|r')
+        end
+        if group.subclass then
+            query.subclass = group.subclass
+        end
+        if group.quality then
+            query.quality = group.quality
         end
 
-        debug_log('|cffff00ff[Query] name=' .. tostring(query.name) .. ', class=' .. tostring(query.class) .. '|r')
+        debug_log('|cffff00ff[Query] name=' .. tostring(query.name) .. ', class=' .. tostring(query.class) .. ', subclass=' .. tostring(query.subclass) .. ', quality=' .. tostring(query.quality) .. '|r')
 
         scan.start{
             type = 'list',
