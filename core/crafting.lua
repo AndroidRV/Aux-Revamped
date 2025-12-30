@@ -6,6 +6,12 @@ local info = require 'aux.util.info'
 local money = require 'aux.util.money'
 local history = require 'aux.core.history'
 local search_tab = require 'aux.tabs.search'
+local reagents_tab = require 'aux.tabs.reagents'
+local gui = require 'aux.gui'
+
+-- Cache invalidation functions (defined in the do block below)
+local invalidate_tradeskill_cache_fn
+local invalidate_craft_cache_fn
 
 function aux.handle.LOAD()
     if not aux.account_data.crafting_cost then
@@ -18,10 +24,22 @@ function aux.handle.LOAD()
             trade_skill_ui_loaded()
         end
     end)
+
+    -- Invalidate cache when windows close (ensures fresh prices on reopen)
+    aux.event_listener('TRADE_SKILL_CLOSE', function()
+        if invalidate_tradeskill_cache_fn then invalidate_tradeskill_cache_fn() end
+    end)
+    aux.event_listener('CRAFT_CLOSE', function()
+        if invalidate_craft_cache_fn then invalidate_craft_cache_fn() end
+    end)
 end
 
 do
-    -- Cache for last known cost/profit values per recipe
+    -- Cache for profit suffixes by recipe NAME (not index, since indices change with filtering)
+    local tradeskill_profit_cache = {}
+    local craft_profit_cache = {}
+
+    -- Cache for detailed cost labels (used when recipe is selected)
     local cached_costs = {}
 
     -- Calculate profit for a tradeskill recipe (returns cost, profit)
@@ -135,6 +153,55 @@ do
         return ''
     end
 
+    -- Get cached profit suffix for a tradeskill recipe (lazy calculation by name)
+    local function get_tradeskill_profit_suffix(skill_index)
+        local skill_name, skill_type = GetTradeSkillInfo(skill_index)
+        if skill_type == 'header' or not skill_name then
+            return ''
+        end
+
+        -- Check cache by name
+        if tradeskill_profit_cache[skill_name] then
+            return tradeskill_profit_cache[skill_name]
+        end
+
+        -- Calculate and cache
+        local _, profit = calculate_tradeskill_profit(skill_index)
+        local suffix = profit_suffix(profit)
+        tradeskill_profit_cache[skill_name] = suffix
+        return suffix
+    end
+
+    -- Get cached profit suffix for a craft recipe (lazy calculation by name)
+    local function get_craft_profit_suffix(craft_index)
+        local craft_name, _, craft_type = GetCraftInfo(craft_index)
+        if craft_type == 'header' or not craft_name then
+            return ''
+        end
+
+        -- Check cache by name
+        if craft_profit_cache[craft_name] then
+            return craft_profit_cache[craft_name]
+        end
+
+        -- Calculate and cache
+        local _, profit = calculate_craft_profit(craft_index)
+        local suffix = profit_suffix(profit)
+        craft_profit_cache[craft_name] = suffix
+        return suffix
+    end
+
+    -- Invalidate cache (called after crafting - prices may have changed)
+    local function invalidate_tradeskill_cache()
+        T.wipe(tradeskill_profit_cache)
+    end
+    invalidate_tradeskill_cache_fn = invalidate_tradeskill_cache
+
+    local function invalidate_craft_cache()
+        T.wipe(craft_profit_cache)
+    end
+    invalidate_craft_cache_fn = invalidate_craft_cache
+
     local function cost_label(cost, profit, recipe_id, devilsaur_leather_value)
         -- Cache the values if they're valid
         if cost and recipe_id then
@@ -189,6 +256,65 @@ do
             end
         end)
     end
+
+    -- Add reagents from current tradeskill recipe to scan list
+    local function add_tradeskill_reagents_to_list()
+        local id = GetTradeSkillSelectionIndex()
+        if not id or id == 0 then
+            aux.print('No recipe selected')
+            return
+        end
+
+        local added_count = 0
+        for i = 1, GetTradeSkillNumReagents(id) do
+            local link = GetTradeSkillReagentItemLink(id, i)
+            if link then
+                local item_id = info.parse_link(link)
+                local reagent_name = aux.select(1, GetTradeSkillReagentInfo(id, i))
+                if item_id and reagent_name then
+                    if reagents_tab.add_reagent(reagent_name, item_id) then
+                        added_count = added_count + 1
+                    end
+                end
+            end
+        end
+
+        if added_count > 0 then
+            aux.print('Added ' .. added_count .. ' reagent(s) to scan list')
+        else
+            aux.print('All reagents already in scan list')
+        end
+    end
+
+    -- Add reagents from current craft recipe to scan list
+    local function add_craft_reagents_to_list()
+        local id = GetCraftSelectionIndex()
+        if not id or id == 0 then
+            aux.print('No recipe selected')
+            return
+        end
+
+        local added_count = 0
+        for i = 1, GetCraftNumReagents(id) do
+            local link = GetCraftReagentItemLink(id, i)
+            if link then
+                local item_id = info.parse_link(link)
+                local reagent_name = aux.select(1, GetCraftReagentInfo(id, i))
+                if item_id and reagent_name then
+                    if reagents_tab.add_reagent(reagent_name, item_id) then
+                        added_count = added_count + 1
+                    end
+                end
+            end
+        end
+
+        if added_count > 0 then
+            aux.print('Added ' .. added_count .. ' reagent(s) to scan list')
+        else
+            aux.print('All reagents already in scan list')
+        end
+    end
+
     function craft_ui_loaded()
         aux.hook('CraftFrame_SetSelection', T.vararg-function(arg)
             local ret = T.temp-T.list(aux.orig.CraftFrame_SetSelection(unpack(arg)))
@@ -241,31 +367,46 @@ do
             hook_quest_item(_G['CraftReagent' .. i])
         end
 
-        -- Hook CraftFrame_Update to add profit suffixes to recipe list
+        -- Hook CraftFrame_Update to add profit suffixes to recipe list (lazy cached)
         aux.hook('CraftFrame_Update', function()
             aux.orig.CraftFrame_Update()
+
             local num_crafts = GetNumCrafts()
             local craft_offset = FauxScrollFrame_GetOffset(CraftListScrollFrame)
             for i = 1, CRAFTS_DISPLAYED do
                 local craft_index = craft_offset + i
                 if craft_index <= num_crafts then
-                    local craft_name, _, craft_type = GetCraftInfo(craft_index)
-                    -- Only add profit to actual recipes, not headers
-                    if craft_type ~= 'header' and craft_name then
-                        local _, profit = calculate_craft_profit(craft_index)
-                        local suffix = profit_suffix(profit)
-                        if suffix ~= '' then
-                            local text_element = _G['Craft' .. i .. 'Text']
-                            if text_element then
-                                local current_text = text_element:GetText()
-                                if current_text then
-                                    text_element:SetText(current_text .. suffix)
-                                end
+                    -- Lazy lookup: calculates only if not cached
+                    local suffix = get_craft_profit_suffix(craft_index)
+                    if suffix ~= '' then
+                        local text_element = _G['Craft' .. i .. 'Text']
+                        if text_element then
+                            local current_text = text_element:GetText()
+                            if current_text then
+                                text_element:SetText(current_text .. suffix)
                             end
                         end
                     end
                 end
             end
+        end)
+
+        -- Add "Add Reagents" button to Craft frame
+        local btn = CreateFrame('Button', 'AuxCraftAddReagentsButton', CraftFrame, 'UIPanelButtonTemplate')
+        btn:SetWidth(100)
+        btn:SetHeight(22)
+        btn:SetText('Add Reagents')
+        btn:SetPoint('BOTTOMRIGHT', CraftFrame, 'BOTTOMRIGHT', -20, 80)
+        btn:SetScript('OnClick', add_craft_reagents_to_list)
+        btn:SetScript('OnEnter', function()
+            GameTooltip:SetOwner(this, 'ANCHOR_RIGHT')
+            GameTooltip:AddLine('Add Reagents to AH Scan List')
+            GameTooltip:AddLine('Adds all reagents from the selected recipe', 0.7, 0.7, 0.7, true)
+            GameTooltip:AddLine('to the AH reagent scan list.', 0.7, 0.7, 0.7, true)
+            GameTooltip:Show()
+        end)
+        btn:SetScript('OnLeave', function()
+            GameTooltip:Hide()
         end)
     end
     function trade_skill_ui_loaded()
@@ -348,31 +489,46 @@ do
             hook_quest_item(_G['TradeSkillReagent' .. i])
         end
 
-        -- Hook TradeSkillFrame_Update to add profit suffixes to recipe list
+        -- Hook TradeSkillFrame_Update to add profit suffixes to recipe list (lazy cached)
         aux.hook('TradeSkillFrame_Update', function()
             aux.orig.TradeSkillFrame_Update()
+
             local num_skills = GetNumTradeSkills()
             local skill_offset = FauxScrollFrame_GetOffset(TradeSkillListScrollFrame)
             for i = 1, TRADE_SKILLS_DISPLAYED do
                 local skill_index = skill_offset + i
                 if skill_index <= num_skills then
-                    local skill_name, skill_type = GetTradeSkillInfo(skill_index)
-                    -- Only add profit to actual recipes, not headers
-                    if skill_type ~= 'header' and skill_name then
-                        local _, profit = calculate_tradeskill_profit(skill_index)
-                        local suffix = profit_suffix(profit)
-                        if suffix ~= '' then
-                            local text_element = _G['TradeSkillSkill' .. i .. 'Text']
-                            if text_element then
-                                local current_text = text_element:GetText()
-                                if current_text then
-                                    text_element:SetText(current_text .. suffix)
-                                end
+                    -- Lazy lookup: calculates only if not cached
+                    local suffix = get_tradeskill_profit_suffix(skill_index)
+                    if suffix ~= '' then
+                        local text_element = _G['TradeSkillSkill' .. i .. 'Text']
+                        if text_element then
+                            local current_text = text_element:GetText()
+                            if current_text then
+                                text_element:SetText(current_text .. suffix)
                             end
                         end
                     end
                 end
             end
+        end)
+
+        -- Add "Add Reagents" button to TradeSkill frame
+        local btn = CreateFrame('Button', 'AuxTradeSkillAddReagentsButton', TradeSkillFrame, 'UIPanelButtonTemplate')
+        btn:SetWidth(100)
+        btn:SetHeight(22)
+        btn:SetText('Add Reagents')
+        btn:SetPoint('BOTTOMRIGHT', TradeSkillFrame, 'BOTTOMRIGHT', -20, 80)
+        btn:SetScript('OnClick', add_tradeskill_reagents_to_list)
+        btn:SetScript('OnEnter', function()
+            GameTooltip:SetOwner(this, 'ANCHOR_RIGHT')
+            GameTooltip:AddLine('Add Reagents to AH Scan List')
+            GameTooltip:AddLine('Adds all reagents from the selected recipe', 0.7, 0.7, 0.7, true)
+            GameTooltip:AddLine('to the AH reagent scan list.', 0.7, 0.7, 0.7, true)
+            GameTooltip:Show()
+        end)
+        btn:SetScript('OnLeave', function()
+            GameTooltip:Hide()
         end)
     end
 end
