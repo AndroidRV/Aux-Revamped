@@ -257,6 +257,32 @@ do
         end)
     end
 
+    -- Hook for the crafted item icon (the recipe result)
+    local function hook_crafted_item_icon(f, get_item_link_func)
+        f:RegisterForClicks('LeftButtonUp', 'RightButtonUp')
+        local orig_onclick = f:GetScript('OnClick')
+        f:SetScript('OnClick', function()
+            if arg1 == 'RightButton' then
+                if aux.get_tab() then
+                    local item_link = get_item_link_func()
+                    if item_link then
+                        local item_id, suffix_id = info.parse_link(item_link)
+                        local item_info = info.item(item_id, suffix_id)
+                        if item_info and item_info.name then
+                            aux.set_tab(1)
+                            search_tab.set_filter(item_info.name .. '/exact')
+                            search_tab.execute(nil, false)
+                            return
+                        end
+                    end
+                end
+            end
+            if orig_onclick then
+                orig_onclick()
+            end
+        end)
+    end
+
     -- Add reagents from current tradeskill recipe to scan list
     local function add_tradeskill_reagents_to_list()
         local id = GetTradeSkillSelectionIndex()
@@ -365,6 +391,14 @@ do
         end)
         for i = 1, 8 do
             hook_quest_item(_G['CraftReagent' .. i])
+        end
+
+        -- Hook the crafted item icon for right-click search
+        if CraftIcon then
+            hook_crafted_item_icon(CraftIcon, function()
+                local id = GetCraftSelectionIndex()
+                return id and GetCraftItemLink(id)
+            end)
         end
 
         -- Hook CraftFrame_Update to add profit suffixes to recipe list (lazy cached)
@@ -487,6 +521,14 @@ do
         end)
         for i = 1, 8 do
             hook_quest_item(_G['TradeSkillReagent' .. i])
+        end
+
+        -- Hook the crafted item icon for right-click search
+        if TradeSkillSkillIcon then
+            hook_crafted_item_icon(TradeSkillSkillIcon, function()
+                local id = GetTradeSkillSelectionIndex()
+                return id and GetTradeSkillItemLink(id)
+            end)
         end
 
         -- Hook TradeSkillFrame_Update to add profit suffixes to recipe list (lazy cached)
