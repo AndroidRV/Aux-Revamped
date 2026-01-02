@@ -10,6 +10,9 @@ local gui = require 'aux.gui'
 
 local tab = aux.tab 'Reagents'
 
+-- Module-level variable to track which item is currently being scanned
+local current_scanning_item_id = nil
+
 function aux.handle.LOAD()
 	reagent_scan_list = aux.realm_data.reagent_scan_list
 end
@@ -47,7 +50,6 @@ end
 
 function update_listing()
 	local reagent_rows = T.acquire()
-	local scanning_item_id = M.get_scanning_item_id and M.get_scanning_item_id() or nil
 
 	for i = 1, getn(reagent_scan_list) do
 		local reagent = reagent_scan_list[i]
@@ -63,10 +65,10 @@ function update_listing()
 			pct_str = gui.percentage_historical(pct)
 		end
 
-		-- Show "Scanning..." if this item is currently being scanned
+		-- Show "In Progress" if this item is currently being scanned
 		local last_scanned_str
-		if scanning_item_id and reagent.item_id == scanning_item_id then
-			last_scanned_str = '|cff00ff00Scanning...|r'
+		if current_scanning_item_id and reagent.item_id == current_scanning_item_id then
+			last_scanned_str = '|cffffff00In Progress|r'
 		else
 			last_scanned_str = format_relative_time(reagent.last_scanned)
 		end
@@ -116,11 +118,6 @@ do
 	local scanning = false
 	local scan_queue = {}
 	local current_scan_index = 1
-	local current_scanning_item_id = nil
-
-	function M.get_scanning_item_id()
-		return current_scanning_item_id
-	end
 
 	function M.scan_reagents()
 		if scanning then
