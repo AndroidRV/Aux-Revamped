@@ -12,6 +12,22 @@ local UNKNOWN = RED_FONT_COLOR_CODE .. 'Unknown' .. FONT_COLOR_CODE_CLOSE
 
 local game_tooltip_hooks, game_tooltip_money = {}, 0
 
+-- Track last tooltip context for refresh capability
+local last_tooltip_context = nil
+
+-- Refresh the current tooltip if it's showing a tradeskill/craft item
+function M.refresh_if_tradeskill()
+    if last_tooltip_context and GameTooltip:IsVisible() then
+        local ctx = last_tooltip_context
+        -- Only refresh if the corresponding frame is still visible
+        if ctx.type == 'tradeskill' and TradeSkillFrame and TradeSkillFrame:IsVisible() then
+            GameTooltip:SetTradeSkillItem(ctx.skill, ctx.slot)
+        elseif ctx.type == 'craft' and CraftFrame and CraftFrame:IsVisible() then
+            GameTooltip:SetCraftItem(ctx.skill, ctx.slot)
+        end
+    end
+end
+
 function aux.handle.LOAD()
     settings = aux.character_data.tooltip
     do
@@ -187,6 +203,7 @@ function game_tooltip_hooks:SetCraftItem(skill, slot)
         link, quantity = GetCraftItemLink(skill), 1
     end
     if link then
+        last_tooltip_context = { type = 'craft', skill = skill, slot = slot }
         extend_tooltip(GameTooltip, link, quantity)
     end
 end
@@ -206,6 +223,7 @@ function game_tooltip_hooks:SetTradeSkillItem(skill, slot)
         link, quantity = GetTradeSkillItemLink(skill), 1
     end
     if link then
+        last_tooltip_context = { type = 'tradeskill', skill = skill, slot = slot }
         extend_tooltip(GameTooltip, link, quantity)
     end
 end

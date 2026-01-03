@@ -17,6 +17,7 @@ local T = require 'T'
 local aux = require 'aux'
 
 local persistence = require 'aux.util.persistence'
+local tooltip = require 'aux.core.tooltip'
 
 local history_schema = {'tuple', '#', {next_push='number'}, {daily_min_buyout='number'}, {data_points={'list', ';', {'tuple', '@', {value='number'}, {time='number'}}}}}
 
@@ -135,7 +136,7 @@ function M.process_auction(auction_record, pages)
 		end
 	end
 
-	-- Always refresh crafting windows when price updates
+	-- Always refresh crafting windows and tooltip when price updates
 	if price_updated then
 		if TradeSkillFrame and TradeSkillFrame:IsVisible() then
 			local current_selection = GetTradeSkillSelectionIndex()
@@ -153,6 +154,8 @@ function M.process_auction(auction_record, pages)
 				CraftFrame_SetSelection(current_selection)
 			end
 		end
+		-- Refresh tooltip if it's showing a tradeskill/craft item
+		tooltip.refresh_if_tradeskill()
 	end
 end
 
