@@ -5,10 +5,16 @@ local aux = require 'aux'
 local info = require 'aux.util.info'
 local scan_util = require 'aux.util.scan'
 local scan = require 'aux.core.scan'
+local crafting = require 'aux.core.crafting'
 
 local tab = aux.tab 'Auctions'
 
 auction_records = T.acquire()
+
+-- Public function to get auction records
+function M.get_auction_records()
+    return auction_records
+end
 
 function tab.OPEN()
     frame:Show()
@@ -44,6 +50,8 @@ function M.scan_auctions()
             status_bar:update_status(1, 1)
             status_bar:set_text('|cff00ff00Scan complete|r')
             update_listing()
+            -- Invalidate crafting cache so "In AH" indicators update
+            crafting.invalidate_auction_cache()
         end,
         on_abort = function()
             status_bar:update_status(1, 1)

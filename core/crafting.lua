@@ -7,11 +7,18 @@ local money = require 'aux.util.money'
 local history = require 'aux.core.history'
 local search_tab = require 'aux.tabs.search'
 local reagents_tab = require 'aux.tabs.reagents'
+local auctions_tab = require 'aux.tabs.auctions'
 local gui = require 'aux.gui'
 
 -- Cache invalidation functions (defined in the do block below)
 local invalidate_tradeskill_cache_fn
 local invalidate_craft_cache_fn
+
+-- Public function to invalidate cache when auction data changes
+function M.invalidate_auction_cache()
+    if invalidate_tradeskill_cache_fn then invalidate_tradeskill_cache_fn() end
+    if invalidate_craft_cache_fn then invalidate_craft_cache_fn() end
+end
 
 function aux.handle.LOAD()
     if not aux.account_data.crafting_cost then
@@ -153,6 +160,34 @@ do
         return ''
     end
 
+    -- Check if an item is currently listed in player's auctions
+    local function is_item_in_auction(item_link)
+        if not item_link then
+            return false
+        end
+
+        local auction_records = auctions_tab.get_auction_records()
+        if not auction_records then
+            return false
+        end
+
+        local item_id, suffix_id = info.parse_link(item_link)
+        if not item_id then
+            return false
+        end
+
+        local item_key = item_id .. ':' .. suffix_id
+
+        -- Search through auction_records for matching item
+        for i = 1, table.getn(auction_records) do
+            if auction_records[i].item_key == item_key then
+                return true
+            end
+        end
+
+        return false
+    end
+
     -- Get cached profit suffix for a tradeskill recipe (lazy calculation by name)
     local function get_tradeskill_profit_suffix(skill_index)
         local skill_name, skill_type = GetTradeSkillInfo(skill_index)
@@ -165,9 +200,16 @@ do
             return tradeskill_profit_cache[skill_name]
         end
 
-        -- Calculate and cache
+        -- Calculate profit suffix
         local _, profit = calculate_tradeskill_profit(skill_index)
         local suffix = profit_suffix(profit)
+
+        -- Check if item is in auction and add indicator
+        local item_link = GetTradeSkillItemLink(skill_index)
+        if is_item_in_auction(item_link) then
+            suffix = suffix .. '|cff3399ff' .. ' [In AH]' .. FONT_COLOR_CODE_CLOSE
+        end
+
         tradeskill_profit_cache[skill_name] = suffix
         return suffix
     end
@@ -184,9 +226,16 @@ do
             return craft_profit_cache[craft_name]
         end
 
-        -- Calculate and cache
+        -- Calculate profit suffix
         local _, profit = calculate_craft_profit(craft_index)
         local suffix = profit_suffix(profit)
+
+        -- Check if item is in auction and add indicator
+        local item_link = GetCraftItemLink(craft_index)
+        if is_item_in_auction(item_link) then
+            suffix = suffix .. '|cff3399ff' .. ' [In AH]' .. FONT_COLOR_CODE_CLOSE
+        end
+
         craft_profit_cache[craft_name] = suffix
         return suffix
     end
