@@ -48,4 +48,15 @@ do
 	btn:SetScript('OnClick',function()
 		if AuctionFrame:IsVisible() then HideUIPanel(AuctionFrame) else ShowUIPanel(AuctionFrame) end
 	end)
+	blizzard_button = btn
+end
+do
+	local settings_gui = require 'aux.gui.settings'
+	local btn = gui.button(frame, gui.font_size.small)
+	btn:SetPoint('RIGHT', blizzard_button, 'LEFT', -5, 0)
+	gui.set_size(btn, 60, 24)
+	btn:SetText('Settings')
+	btn:SetScript('OnClick', function()
+		settings_gui.toggle()
+	end)
 end

@@ -163,6 +163,7 @@ do
         local solo_items = {}
 
         -- Pass 1: Initial grouping by prefix + class
+        local min_quality = aux.account_data.undercut_min_quality or 2
         for i = 1, table.getn(auction_records) do
             local record = auction_records[i]
             if record.buyout_price and record.buyout_price > 0 then
@@ -177,8 +178,8 @@ do
                     -- Get item info for class and quality
                     local item_info = info.item(record.item_key)
 
-                    -- Only check blue (rare) quality and above (quality >= 3)
-                    if not item_info or not item_info.quality or item_info.quality < 3 then
+                    -- Only check items at or above the configured minimum quality
+                    if not item_info or not item_info.quality or item_info.quality < min_quality then
                         -- Skip items below rare quality
                         record.undercut_status = nil
                         debug_log('|cff888888[Skip] ' .. record.name .. ' - quality too low (' .. tostring(item_info and item_info.quality or 'unknown') .. ')|r')
