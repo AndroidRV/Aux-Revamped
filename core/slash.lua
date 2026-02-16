@@ -4,6 +4,7 @@ local T = require 'T'
 local aux = require 'aux'
 local info = require 'aux.util.info'
 local post = require 'aux.tabs.post'
+local settings_gui = require 'aux.gui.settings'
 
 function status(enabled)
 	return (enabled and aux.color.green'on' or aux.color.red'off')
@@ -11,10 +12,11 @@ end
 
 _G.SLASH_AUX1 = '/aux'
 function SlashCmdList.AUX(command)
-	if not command then return end
-	local arguments = aux.tokenize(command)
+	local arguments = command and aux.tokenize(command) or {}
     local tooltip_settings = aux.character_data.tooltip
-    if arguments[1] == 'scale' and tonumber(arguments[2]) then
+    if not arguments[1] or arguments[1] == 'settings' or arguments[1] == 'config' or arguments[1] == 'gui' then
+	    settings_gui.toggle()
+    elseif arguments[1] == 'scale' and tonumber(arguments[2]) then
     	local scale = tonumber(arguments[2])
 	    aux.frame:SetScale(scale)
 	    aux.account_data.scale = scale
@@ -69,6 +71,7 @@ function SlashCmdList.AUX(command)
 		aux.print('undercut debug ' .. status(aux.account_data.undercut_debug))
 	else
 		aux.print('Usage:')
+		aux.print('- ' .. aux.color.yellow'settings' .. ' - Open settings GUI')
 		aux.print('- scale [' .. aux.color.blue(aux.account_data.scale) .. ']')
 		aux.print('- ignore owner [' .. status(aux.account_data.ignore_owner) .. ']')
 		aux.print('- post bid [' .. status(aux.account_data.post_bid) .. ']')
