@@ -60,6 +60,8 @@ function M.scan_auctions()
     }
 end
 
+local undercut_busy = false
+
 do
     local scan_id = 0
     local IDLE, SEARCHING, FOUND = aux.enum(3)
@@ -97,6 +99,8 @@ do
 
         if state == SEARCHING then return end
 
+        if undercut_busy then return end
+
         local selection = listing:GetSelection()
         if not selection then
             state = IDLE
@@ -113,9 +117,7 @@ do
     local checking = false
     local check_queue = {}
     local current_check_index = 1
-    local canceling = false
-    local cancel_queue = {}
-    local cancel_index = 1
+    local total_canceled = 0
 
     -- Debug logging helper
     local function debug_log(msg)
@@ -143,7 +145,7 @@ do
     end
 
     function M.check_undercuts()
-        if checking or canceling then
+        if checking then
             DEFAULT_CHAT_FRAME:AddMessage('|cffff0000Operation already in progress!|r')
             return
         end
@@ -156,6 +158,7 @@ do
         -- Reset queue and status
         T.wipe(check_queue)
         current_check_index = 1
+        total_canceled = 0
         checking = true
 
         -- Group items by prefix + class combination for efficient batch checking
@@ -265,6 +268,7 @@ do
 
         debug_log('|cff00ff00[Undercut] Grouped ' .. table.getn(auction_records) .. ' items into ' .. table.getn(check_queue) .. ' search queries|r')
 
+        undercut_busy = true
         undercut_button:SetText('Checking...')
         undercut_button:Disable()
         status_bar:update_status(0, 0)
@@ -279,27 +283,17 @@ do
         if current_check_index > table.getn(check_queue) then
             -- All done
             checking = false
+            undercut_busy = false
             undercut_button:SetText('Check Undercuts')
             undercut_button:Enable()
             status_bar:update_status(1, 1)
             status_bar:set_text('|cff00ff00Undercut check complete|r')
 
-            -- Count results
-            local undercut_count = 0
-            for i = 1, table.getn(auction_records) do
-                if auction_records[i].undercut_status == 'undercut' then
-                    undercut_count = undercut_count + 1
-                end
-            end
-
-            if undercut_count > 0 then
-                DEFAULT_CHAT_FRAME:AddMessage('|cffff0000' .. undercut_count .. ' auction(s) have been undercut! Auto-canceling...|r')
-                -- Automatically start canceling undercut items
-                cancel_all_undercut()
+            if total_canceled > 0 then
+                DEFAULT_CHAT_FRAME:AddMessage('|cff00ff00Undercut check complete. Canceled ' .. total_canceled .. ' auction(s).|r')
+                scan_auctions()
             else
                 DEFAULT_CHAT_FRAME:AddMessage('|cff00ff00No auctions undercut|r')
-                undercut_button:SetText('Check Undercuts')
-                undercut_button:Enable()
             end
             return
         end
@@ -382,22 +376,34 @@ do
                 end
             end,
             on_complete = function()
-                -- Mark any items not undercut as lowest
-                local undercut_in_group = 0
+                -- Mark any items not undercut as lowest, collect undercut ones
+                local undercut_items = {}
                 for i = 1, table.getn(group.items) do
                     if group.items[i].undercut_status == 'undercut' then
-                        undercut_in_group = undercut_in_group + 1
+                        tinsert(undercut_items, group.items[i])
                     elseif group.items[i].undercut_status == 'checking' then
                         group.items[i].undercut_status = 'lowest'
                     end
                 end
 
-                debug_log('|cff00ff00[Undercut] Checked ' .. auction_count .. ' auctions - ' .. undercut_in_group .. ' of ' .. table.getn(group.items) .. ' items undercut|r')
+                debug_log('|cff00ff00[Undercut] Checked ' .. auction_count .. ' auctions - ' .. table.getn(undercut_items) .. ' of ' .. table.getn(group.items) .. ' items undercut|r')
                 update_listing()
                 current_check_index = current_check_index + 1
-                check_next_item()
+
+                if table.getn(undercut_items) > 0 then
+                    cancel_items_immediately(undercut_items, check_next_item)
+                else
+                    check_next_item()
+                end
             end,
             on_abort = function()
+                if not frame:IsShown() then
+                    checking = false
+                    undercut_busy = false
+                    undercut_button:SetText('Check Undercuts')
+                    undercut_button:Enable()
+                    return
+                end
                 DEFAULT_CHAT_FRAME:AddMessage('|cffff0000[Undercut Error] Failed to check group "' .. group.search_name .. '"|r')
                 for i = 1, table.getn(group.items) do
                     group.items[i].undercut_status = 'error'
@@ -409,99 +415,60 @@ do
         }
     end
 
-    -- Cancel all undercut items automatically
-    function cancel_all_undercut()
-        if canceling then
-            DEFAULT_CHAT_FRAME:AddMessage('|cffff0000Cancel already in progress!|r')
-            return
-        end
+    -- Cancel a list of items immediately, then call callback when done
+    function cancel_items_immediately(items, callback)
+        local idx = 1
+        local total = table.getn(items)
 
-        -- Build queue of undercut items
-        T.wipe(cancel_queue)
-        for i = 1, table.getn(auction_records) do
-            if auction_records[i].undercut_status == 'undercut' then
-                tinsert(cancel_queue, auction_records[i])
+        DEFAULT_CHAT_FRAME:AddMessage('|cffff0000Canceling ' .. total .. ' undercut auction(s)...|r')
+
+        local function do_next()
+            if idx > total then
+                callback()
+                return
             end
-        end
 
-        if table.getn(cancel_queue) == 0 then
-            DEFAULT_CHAT_FRAME:AddMessage('|cffff0000No undercut items to cancel!|r')
-            return
-        end
+            local record = items[idx]
 
-        canceling = true
-        cancel_index = 1
-        undercut_button:SetText('Canceling...')
-        undercut_button:Disable()
-        status_bar:update_status(0, 0)
-        status_bar:set_text('|cffff0000Starting auto-cancel...|r')
+            DEFAULT_CHAT_FRAME:AddMessage(format('|cffff8000[%d/%d] Canceling:|r |cff00ffff%s|r', idx, total, record.name))
+            debug_log('|cffffff00[Cancel] Finding and canceling: ' .. record.name .. '|r')
 
-        DEFAULT_CHAT_FRAME:AddMessage('|cffff0000Auto-canceling ' .. table.getn(cancel_queue) .. ' undercut auction(s)...|r')
-
-        -- Start canceling first item
-        cancel_next_item()
-    end
-
-    function cancel_next_item()
-        if cancel_index > table.getn(cancel_queue) then
-            -- All done
-            canceling = false
-            undercut_button:SetText('Check Undercuts')
-            undercut_button:Enable()
-            status_bar:update_status(1, 1)
-            status_bar:set_text('|cff00ff00Auto-cancel complete|r')
-            DEFAULT_CHAT_FRAME:AddMessage('|cff00ff00Successfully canceled ' .. table.getn(cancel_queue) .. ' auction(s)!|r')
-
-            -- Refresh auction list
-            scan_auctions()
-            return
-        end
-
-        local record = cancel_queue[cancel_index]
-        local total = table.getn(cancel_queue)
-
-        -- Update progress
-        status_bar:update_status((cancel_index - 1) / total, 0)
-        status_bar:set_text(format('|cffff0000Canceling...|r (|cffff8000%d|r / |cff00ff00%d|r)', cancel_index, total))
-
-        -- Show which item we're canceling
-        DEFAULT_CHAT_FRAME:AddMessage(format('|cffff8000[%d/%d] Canceling:|r |cff00ffff%s|r', cancel_index, total, record.name))
-
-        debug_log('|cffffff00[Cancel] Finding and canceling: ' .. record.name .. '|r')
-
-        -- Find and cancel this auction
-        scan_util.find(
-            record,
-            status_bar,
-            function()
-                -- Not found / search complete
-                DEFAULT_CHAT_FRAME:AddMessage('|cffff0000[Cancel Error] Could not find ' .. record.name .. ' - skipping|r')
-                cancel_index = cancel_index + 1
-                cancel_next_item()
-            end,
-            function()
-                -- Auction no longer exists
-                debug_log('|cffffff00[Cancel] Auction already gone: ' .. record.name .. '|r')
-                listing:RemoveAuctionRecord(record)
-                cancel_index = cancel_index + 1
-                cancel_next_item()
-            end,
-            function(index)
-                -- Found the auction, now cancel it
-                debug_log('|cff00ff00[Cancel] Found ' .. record.name .. ' at index ' .. index .. ', canceling...|r')
-                if scan_util.test(record, index) then
-                    aux.cancel_auction(index, function()
-                        debug_log('|cff00ff00[Cancel] Successfully canceled: ' .. record.name .. '|r')
-                        listing:RemoveAuctionRecord(record)
-                        cancel_index = cancel_index + 1
-                        cancel_next_item()
-                    end)
-                else
-                    DEFAULT_CHAT_FRAME:AddMessage('|cffff0000[Cancel Error] Auction mismatch for ' .. record.name .. ' - skipping|r')
-                    cancel_index = cancel_index + 1
-                    cancel_next_item()
+            scan_util.find(
+                record,
+                status_bar,
+                function()
+                    -- Not found
+                    DEFAULT_CHAT_FRAME:AddMessage('|cffff0000[Cancel Error] Could not find ' .. record.name .. ' - skipping|r')
+                    idx = idx + 1
+                    do_next()
+                end,
+                function()
+                    -- Auction already gone
+                    debug_log('|cffffff00[Cancel] Auction already gone: ' .. record.name .. '|r')
+                    listing:RemoveAuctionRecord(record)
+                    idx = idx + 1
+                    do_next()
+                end,
+                function(index)
+                    -- Found it, cancel
+                    debug_log('|cff00ff00[Cancel] Found ' .. record.name .. ' at index ' .. index .. ', canceling...|r')
+                    if scan_util.test(record, index) then
+                        aux.cancel_auction(index, function()
+                            debug_log('|cff00ff00[Cancel] Successfully canceled: ' .. record.name .. '|r')
+                            listing:RemoveAuctionRecord(record)
+                            total_canceled = total_canceled + 1
+                            idx = idx + 1
+                            do_next()
+                        end)
+                    else
+                        DEFAULT_CHAT_FRAME:AddMessage('|cffff0000[Cancel Error] Auction mismatch for ' .. record.name .. ' - skipping|r')
+                        idx = idx + 1
+                        do_next()
+                    end
                 end
-            end
-        )
+            )
+        end
+
+        do_next()
     end
 end

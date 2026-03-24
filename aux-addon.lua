@@ -68,6 +68,7 @@ function handle.LOAD()
 		sharing = true,
 		undercut_debug = false,
 		undercut_min_quality = 2,
+		post_all_ensure_profit = true,
     })
     do
         local key = format('%s|%s', GetCVar'realmName', UnitName'player')

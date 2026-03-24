@@ -176,6 +176,13 @@ function create_settings_frame()
     cb6:SetChecked(aux.account_data.post_bid)
     y = y - 25
 
+    local cb_pa = create_checkbox(content, 'Post All: ensure profit (skip items below vendor value)', y, function()
+        aux.account_data.post_all_ensure_profit = not aux.account_data.post_all_ensure_profit
+        aux.print('post all ensure profit ' .. status_text(aux.account_data.post_all_ensure_profit))
+    end)
+    cb_pa:SetChecked(aux.account_data.post_all_ensure_profit)
+    y = y - 25
+
     local dlbl = gui.label(content, gui.font_size.small)
     dlbl:SetPoint('TOPLEFT', 8, y)
     dlbl:SetText('Default duration:')

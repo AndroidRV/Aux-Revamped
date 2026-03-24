@@ -144,6 +144,13 @@ do
     refresh_button = btn
 end
 do
+    local btn = gui.button(frame.parameters)
+    btn:SetPoint('TOPLEFT', refresh_button, 'TOPRIGHT', 5, 0)
+    btn:SetText('Post All')
+    btn:SetScript('OnClick', post_all_auctions)
+    post_all_button = btn
+end
+do
 	item = gui.item(frame.parameters)
     item:SetPoint('TOPLEFT', 10, -6)
     item.button:SetScript('OnEnter', function()

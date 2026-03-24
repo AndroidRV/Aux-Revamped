@@ -19,6 +19,9 @@ local tab = aux.tab 'Post'
 local settings_schema = {'tuple', '#', {duration='number'}, {start_price='number'}, {buyout_price='number'}, {hidden='boolean'}}
 
 local scan_id, inventory_records, bid_records, buyout_records = 0, {}, {}, {}
+post_all_items = {}
+post_all_index = 0
+post_all_running = false
 
 M.DURATION_2, M.DURATION_8, M.DURATION_24 = 120, 480, 1440
 
@@ -487,6 +490,177 @@ function undercut(record, stack_size, stack)
 	    price = price - 1
     end
     return price / stack_size
+end
+
+function get_cheapest_buyout(item_key, stack_size)
+	local cheapest_record = nil
+	if buyout_records[item_key] then
+		for _, record in buyout_records[item_key] do
+			if not record.own then
+				if cheapest_record == nil or record.unit_price < cheapest_record.unit_price then
+					cheapest_record = record
+				end
+			end
+		end
+	end
+	if cheapest_record then
+		return undercut(cheapest_record, stack_size)
+	end
+	return nil
+end
+
+function post_all_process_next()
+	post_all_index = post_all_index + 1
+	local total = table.getn(post_all_items)
+
+	if post_all_index > total then
+		post_all_running = false
+		status_bar:update_status(1, 1)
+		status_bar:set_text('|cff00ff00Post All complete|r')
+		update_inventory_records()
+		refresh = true
+		return
+	end
+
+	local item = post_all_items[post_all_index]
+	local item_key = item.key
+
+	status_bar:update_status((post_all_index - 1) / total, 0)
+	status_bar:set_text(format('|cff3399ffPost All|r: scanning %d/%d [%s]', post_all_index, total, item.name))
+
+	-- Clear stale scan data so we get a fresh scan
+	bid_records[item_key] = nil
+	buyout_records[item_key] = nil
+
+	local query = scan_util.item_query(item.item_id)
+
+	scan_id = scan.start{
+		type = 'list',
+		ignore_owner = true,
+		queries = T.list(query),
+		on_page_loaded = function(page, total_pages)
+			status_bar:update_status(((post_all_index - 1) + page / total_pages) / total, 0)
+		end,
+		on_auction = function(auction_record)
+			if auction_record.item_key == item_key then
+				record_auction(
+					auction_record.item_key,
+					auction_record.aux_quantity,
+					auction_record.unit_blizzard_bid,
+					auction_record.unit_buyout_price,
+					auction_record.duration,
+					auction_record.owner
+				)
+			end
+		end,
+		on_abort = function()
+			bid_records[item_key] = nil
+			buyout_records[item_key] = nil
+			post_all_items = {}
+			post_all_running = false
+			status_bar:update_status(1, 1)
+			status_bar:set_text('|cffff0000Post All aborted|r')
+		end,
+		on_complete = function()
+			if not frame:IsShown() then
+				post_all_items = {}
+				post_all_running = false
+				return
+			end
+
+			bid_records[item_key] = bid_records[item_key] or T.acquire()
+			buyout_records[item_key] = buyout_records[item_key] or T.acquire()
+
+			local settings = read_settings(item_key)
+			local duration = settings.duration
+
+			local stack_size = 1
+			local stack_count = item.aux_quantity
+
+			local unit_buyout_price = get_cheapest_buyout(item_key, stack_size)
+			if not unit_buyout_price then
+				local historical_value = history.value(item_key)
+				if historical_value then
+					unit_buyout_price = floor(historical_value * 1.1)
+					aux.print('[' .. item.name .. '] no auctions found, listing at 110% historical value: ' .. money.to_string(unit_buyout_price))
+				else
+					aux.print('[' .. item.name .. '] skipped: no auctions and no historical value, set price manually')
+					post_all_process_next()
+					return
+				end
+			end
+
+			if aux.account_data.post_all_ensure_profit then
+				local vendor_price = aux.account_data.merchant_sell[item.item_id]
+				if vendor_price then
+					local net_price = floor(unit_buyout_price * 0.95 + 0.5)
+					if net_price <= vendor_price then
+						if aux.account_data.undercut_debug then
+							aux.print('[' .. item.name .. '] skipped: ' .. money.to_string(unit_buyout_price) .. ' not profitable vs vendor')
+						end
+						post_all_process_next()
+						return
+					end
+				end
+			end
+
+			local duration_code
+			if duration == DURATION_2 then
+				duration_code = 2
+			elseif duration == DURATION_8 then
+				duration_code = 3
+			elseif duration == DURATION_24 then
+				duration_code = 4
+			end
+
+			status_bar:set_text(format('|cff3399ffPost All|r: posting %d/%d [%s]', post_all_index, total, item.name))
+
+			post.start(
+				item_key,
+				stack_size,
+				duration,
+				unit_buyout_price,
+				unit_buyout_price,
+				stack_count,
+				function(posted)
+					if not frame:IsShown() then
+						post_all_items = {}
+						post_all_running = false
+						return
+					end
+					for i = 1, posted do
+						record_auction(item_key, stack_size, unit_buyout_price * stack_size, unit_buyout_price, duration_code, UnitName'player')
+					end
+					post_all_process_next()
+				end
+			)
+		end,
+	}
+end
+
+function post_all_auctions()
+	if post_all_running then
+		aux.print('Post All is already running.')
+		return
+	end
+
+	post_all_items = {}
+	for _, item in inventory_records do
+		local settings = read_settings(item.key)
+		if item.aux_quantity > 0 and not settings.hidden then
+			tinsert(post_all_items, item)
+		end
+	end
+
+	if table.getn(post_all_items) == 0 then
+		aux.print('Post All: No items to post.')
+		return
+	end
+
+	aux.print('Post All: scanning and posting ' .. table.getn(post_all_items) .. ' item(s)...')
+	post_all_running = true
+	post_all_index = 0
+	post_all_process_next()
 end
 
 function quantity_update(maximize_count)
