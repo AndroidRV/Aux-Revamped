@@ -390,7 +390,7 @@ do
                 update_listing()
                 current_check_index = current_check_index + 1
 
-                if table.getn(undercut_items) > 0 then
+                if table.getn(undercut_items) > 0 and aux.account_data.undercut_auto_cancel then
                     cancel_items_immediately(undercut_items, check_next_item)
                 else
                     check_next_item()

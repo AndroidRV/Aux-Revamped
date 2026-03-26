@@ -68,6 +68,7 @@ function handle.LOAD()
 		sharing = true,
 		undercut_debug = false,
 		undercut_min_quality = 2,
+		undercut_auto_cancel = true,
 		post_all_ensure_profit = true,
     })
     do

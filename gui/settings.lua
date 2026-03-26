@@ -298,6 +298,13 @@ function create_settings_frame()
     upd_quality()
     y = y - 25
 
+    local cb_ac = create_checkbox(content, 'Auto-cancel when undercut', y, function()
+        aux.account_data.undercut_auto_cancel = not aux.account_data.undercut_auto_cancel
+        aux.print('undercut auto-cancel ' .. status_text(aux.account_data.undercut_auto_cancel))
+    end)
+    cb_ac:SetChecked(aux.account_data.undercut_auto_cancel ~= false)
+    y = y - 25
+
     local cb_dbg = create_checkbox(content, 'Enable undercut debug mode', y, function()
         aux.account_data.undercut_debug = not aux.account_data.undercut_debug
         aux.print('undercut debug ' .. status_text(aux.account_data.undercut_debug))
